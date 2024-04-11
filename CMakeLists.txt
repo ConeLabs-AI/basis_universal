@@ -17,7 +17,7 @@ else()
 	option(BUILD_X64 "build 64-bit" TRUE)
 endif()
 
-option(ZSTD "ZSTD support for KTX2 transcoding/encoding" TRUE)
+option(ZSTD "ZSTD support for KTX2 transcoding/encoding" FALSE)
 option(OPENCL "OpenCL support in encoder" FALSE)
 
 message("Initial BUILD_X64=${BUILD_X64}")
@@ -195,6 +195,51 @@ endif()
 if (NOT MSVC)
    target_link_libraries(basisu m pthread ${BASISU_EXTRA_LIBS})
 endif()
+
+add_subdirectory(pybind11)
+
+pybind11_add_module(basis_compressor_python
+    encoder/basisu_comp.cpp
+    encoder/basisu_enc.cpp
+    encoder/basisu_backend.cpp
+    encoder/basisu_basis_file.cpp
+    encoder/basisu_etc.cpp
+    encoder/basisu_frontend.cpp
+    encoder/basisu_gpu_texture.cpp
+    encoder/basisu_pvrtc1_4.cpp
+    encoder/basisu_resampler.cpp
+    encoder/basisu_resample_filters.cpp
+    encoder/basisu_ssim.cpp
+    encoder/basisu_uastc_enc.cpp
+    encoder/basisu_bc7enc.cpp
+    encoder/jpgd.cpp
+    encoder/basisu_opencl.cpp
+    encoder/pvpngreader.cpp
+    transcoder/basisu_transcoder.cpp
+    basis_compressor_python.cpp
+)
+
+if (ZSTD)
+    target_compile_definitions(basis_compressor_python PRIVATE BASISD_SUPPORT_KTX2_ZSTD=1)
+    target_link_libraries(basis_compressor_python PRIVATE zstd)
+else()
+    target_compile_definitions(basis_compressor_python PRIVATE BASISD_SUPPORT_KTX2_ZSTD=0)
+endif()
+
+if (OPENCL)
+    target_compile_definitions(basis_compressor_python PRIVATE BASISU_SUPPORT_OPENCL=1)
+    target_include_directories(basis_compressor_python PRIVATE "OpenCL")
+    if (BUILD_X64)
+        target_link_libraries(basis_compressor_python PRIVATE "OpenCL/lib/OpenCL64")
+    else()
+        target_link_libraries(basis_compressor_python PRIVATE "OpenCL/lib/OpenCL")
+    endif()
+endif()
+
+set_target_properties(basis_compressor_python PROPERTIES
+    OUTPUT_NAME basis_compressor
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/python
+)
 
 if (NOT EMSCRIPTEN)
 	install(TARGETS basisu DESTINATION bin)

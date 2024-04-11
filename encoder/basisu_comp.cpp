@@ -267,6 +267,109 @@ namespace basisu
 		return cECSuccess;
 	}
 
+	basis_compressor::error_code basis_compressor::process_buffers(const uint8_t* png_buffer, size_t png_buffer_size, uint8_vec& compressed_buffer)
+	{
+		debug_printf("basis_compressor::process_buffers\n");
+
+		// Load the PNG buffer into an image object
+		image img;
+		if (!load_png(png_buffer, png_buffer_size, img, nullptr))
+		{
+			error_printf("Failed to load PNG buffer\n");
+			return cECFailedReadingSourceImages;
+		}
+
+		// Set the source image in the compressor parameters
+		m_params.m_source_images.clear();
+		m_params.m_source_images.push_back(img);
+
+		if (!validate_texture_type_constraints())
+			return cECFailedValidating;
+
+		if (m_params.m_create_ktx2_file)
+		{
+			if (!validate_ktx2_constraints())
+				return cECFailedValidating;
+		}
+
+		// Preprocess the source image and setup m_slice_descs and m_slice_images
+		m_stats.resize(0);
+		m_slice_descs.resize(0);
+		m_slice_images.resize(0);
+
+		m_total_blocks = 0;
+
+		m_any_source_image_has_alpha = img.has_alpha();
+
+		basisu::vector<image> slices;
+		slices.resize(1);
+		slices[0].swap(img);
+
+		for (uint32_t slice_index = 0; slice_index < slices.size(); slice_index++)
+		{
+			image& slice_image = slices[slice_index];
+			const uint32_t orig_width = slice_image.get_width();
+			const uint32_t orig_height = slice_image.get_height();
+
+			slice_image.crop_dup_borders(slice_image.get_block_width(4) * 4, slice_image.get_block_height(4) * 4);
+
+			const uint32_t dest_image_index = m_slice_images.size();
+
+			enlarge_vector(m_stats, 1);
+			enlarge_vector(m_slice_images, 1);
+			enlarge_vector(m_slice_descs, 1);
+
+			m_stats[dest_image_index].m_width = orig_width;
+			m_stats[dest_image_index].m_height = orig_height;
+
+			basisu_backend_slice_desc& slice_desc = m_slice_descs[dest_image_index];
+
+			slice_desc.m_first_block_index = m_total_blocks;
+			slice_desc.m_orig_width = orig_width;
+			slice_desc.m_orig_height = orig_height;
+			slice_desc.m_width = slice_image.get_width();
+			slice_desc.m_height = slice_image.get_height();
+			slice_desc.m_num_blocks_x = slice_image.get_block_width(4);
+			slice_desc.m_num_blocks_y = slice_image.get_block_height(4);
+			slice_desc.m_num_macroblocks_x = (slice_desc.m_num_blocks_x + 1) >> 1;
+			slice_desc.m_num_macroblocks_y = (slice_desc.m_num_blocks_y + 1) >> 1;
+			slice_desc.m_source_file_index = 0;
+			slice_desc.m_mip_index = 0;
+			slice_desc.m_alpha = m_any_source_image_has_alpha;
+
+			m_total_blocks += slice_desc.m_num_blocks_x * slice_desc.m_num_blocks_y;
+
+			m_slice_images[dest_image_index].swap(slice_image);
+		}
+
+		if (!extract_source_blocks())
+			return cECFailedFrontEnd;
+
+		if (m_params.m_uastc)
+		{
+			error_code ec = encode_slices_to_uastc();
+			if (ec != cECSuccess)
+				return ec;
+		}
+		else
+		{
+			if (!process_frontend())
+				return cECFailedFrontEnd;
+
+			if (!extract_frontend_texture_data())
+				return cECFailedFontendExtract;
+
+			if (!process_backend())
+				return cECFailedBackend;
+		}
+
+		if (!create_basis_file_and_transcode())
+			return cECFailedCreateBasisFile;
+
+		compressed_buffer = m_basis_file.get_compressed_data();
+		return cECSuccess;
+	}
+
 	basis_compressor::error_code basis_compressor::encode_slices_to_uastc()
 	{
 		debug_printf("basis_compressor::encode_slices_to_uastc\n");

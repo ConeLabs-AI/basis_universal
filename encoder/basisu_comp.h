@@ -482,6 +482,7 @@ namespace basisu
 		};
 
 		error_code process();
+		error_code process_buffers(const uint8_t* png_buffer, size_t png_buffer_size, uint8_vec& compressed_buffer);
 
 		// The output .basis file will always be valid of process() succeeded.
 		const uint8_vec &get_output_basis_file() const { return m_output_basis_file; }
